@@ -19,7 +19,7 @@ from dnnlib.tflib.ops.fused_bias_act import fused_bias_act
 #----------------------------------------------------------------------------
 # Get/create weight tensor for a convolution or fully-connected layer.
 
-def get_weight(shape, gain=1, use_wscale=True, lrmul=1, weight_var='weight'):
+def get_weight(shape, gain=1, use_wscale=True, lrmul=1, weight_var='weight', trainable=True):
     fan_in = np.prod(shape[:-1]) # [kernel, kernel, fmaps_in, fmaps_out] or [in, out]
     he_std = gain / np.sqrt(fan_in) # He init
 
@@ -33,25 +33,25 @@ def get_weight(shape, gain=1, use_wscale=True, lrmul=1, weight_var='weight'):
 
     # Create variable.
     init = tf.initializers.random_normal(0, init_std)
-    return tf.get_variable(weight_var, shape=shape, initializer=init) * runtime_coef
+    return tf.get_variable(weight_var, shape=shape, initializer=init, trainable=trainable) * runtime_coef
 
 #----------------------------------------------------------------------------
 # Fully-connected layer.
 
-def dense_layer(x, fmaps, gain=1, use_wscale=True, lrmul=1, weight_var='weight'):
+def dense_layer(x, fmaps, gain=1, use_wscale=True, lrmul=1, weight_var='weight', trainable=True):
     if len(x.shape) > 2:
         x = tf.reshape(x, [-1, np.prod([d.value for d in x.shape[1:]])])
-    w = get_weight([x.shape[1].value, fmaps], gain=gain, use_wscale=use_wscale, lrmul=lrmul, weight_var=weight_var)
+    w = get_weight([x.shape[1].value, fmaps], gain=gain, use_wscale=use_wscale, lrmul=lrmul, weight_var=weight_var, trainable=trainable)
     w = tf.cast(w, x.dtype)
     return tf.matmul(x, w)
 
 #----------------------------------------------------------------------------
 # Convolution layer with optional upsampling or downsampling.
 
-def conv2d_layer(x, fmaps, kernel, up=False, down=False, resample_kernel=None, gain=1, use_wscale=True, lrmul=1, weight_var='weight'):
+def conv2d_layer(x, fmaps, kernel, up=False, down=False, resample_kernel=None, gain=1, use_wscale=True, lrmul=1, weight_var='weight', trainable=True):
     assert not (up and down)
     assert kernel >= 1 and kernel % 2 == 1
-    w = get_weight([kernel, kernel, x.shape[1].value, fmaps], gain=gain, use_wscale=use_wscale, lrmul=lrmul, weight_var=weight_var)
+    w = get_weight([kernel, kernel, x.shape[1].value, fmaps], gain=gain, use_wscale=use_wscale, lrmul=lrmul, weight_var=weight_var, trainable=trainable)
     if up:
         x = upsample_conv_2d(x, tf.cast(w, x.dtype), data_format='NCHW', k=resample_kernel)
     elif down:
@@ -63,8 +63,8 @@ def conv2d_layer(x, fmaps, kernel, up=False, down=False, resample_kernel=None, g
 #----------------------------------------------------------------------------
 # Apply bias and activation func.
 
-def apply_bias_act(x, act='linear', alpha=None, gain=None, lrmul=1, bias_var='bias'):
-    b = tf.get_variable(bias_var, shape=[x.shape[1]], initializer=tf.initializers.zeros()) * lrmul
+def apply_bias_act(x, act='linear', alpha=None, gain=None, lrmul=1, bias_var='bias', trainable=True):
+    b = tf.get_variable(bias_var, shape=[x.shape[1]], initializer=tf.initializers.zeros(), trainable=trainable) * lrmul
     return fused_bias_act(x, b=tf.cast(b, x.dtype), act=act, alpha=alpha, gain=gain)
 
 #----------------------------------------------------------------------------
@@ -86,17 +86,17 @@ def naive_downsample_2d(x, factor=2):
 #----------------------------------------------------------------------------
 # Modulated convolution layer.
 
-def modulated_conv2d_layer(x, y, fmaps, kernel, up=False, down=False, demodulate=True, resample_kernel=None, gain=1, use_wscale=True, lrmul=1, fused_modconv=True, weight_var='weight', mod_weight_var='mod_weight', mod_bias_var='mod_bias'):
+def modulated_conv2d_layer(x, y, fmaps, kernel, up=False, down=False, demodulate=True, resample_kernel=None, gain=1, use_wscale=True, lrmul=1, fused_modconv=True, weight_var='weight', mod_weight_var='mod_weight', mod_bias_var='mod_bias', trainable=True):
     assert not (up and down)
     assert kernel >= 1 and kernel % 2 == 1
 
     # Get weight.
-    w = get_weight([kernel, kernel, x.shape[1].value, fmaps], gain=gain, use_wscale=use_wscale, lrmul=lrmul, weight_var=weight_var)
+    w = get_weight([kernel, kernel, x.shape[1].value, fmaps], gain=gain, use_wscale=use_wscale, lrmul=lrmul, weight_var=weight_var, trainable=trainable)
     ww = w[np.newaxis] # [BkkIO] Introduce minibatch dimension.
 
     # Modulate.
-    s = dense_layer(y, fmaps=x.shape[1].value, weight_var=mod_weight_var) # [BI] Transform incoming W to style.
-    s = apply_bias_act(s, bias_var=mod_bias_var) + 1 # [BI] Add bias (initially 1).
+    s = dense_layer(y, fmaps=x.shape[1].value, weight_var=mod_weight_var, trainable=trainable) # [BI] Transform incoming W to style.
+    s = apply_bias_act(s, bias_var=mod_bias_var, trainable=trainable) + 1 # [BI] Add bias (initially 1).
     ww *= tf.cast(s[:, np.newaxis, np.newaxis, :, np.newaxis], w.dtype) # [BkkIO] Scale input feature maps.
 
     # Demodulate.
@@ -164,6 +164,7 @@ def G_main(
     components              = dnnlib.EasyDict(),        # Container for sub-networks. Retained between calls.
     mapping_func            = 'G_mapping',              # Build func name for the mapping network.
     synthesis_func          = 'G_synthesis_stylegan2',  # Build func name for the synthesis network.
+    transfer_learning       = False,                    # Set transfer learning flag to freeze some layers during training
     **kwargs):                                          # Arguments for sub-networks (mapping and synthesis).
 
     # Validate arguments.
@@ -261,9 +262,16 @@ def G_mapping(
     mapping_nonlinearity    = 'lrelu',      # Activation function: 'relu', 'lrelu', etc.
     normalize_latents       = True,         # Normalize latent vectors (Z) before feeding them to the mapping layers?
     dtype                   = 'float32',    # Data type to use for activations and outputs.
+    transfer_learning       = False,        # Set transfer learning flag to freeze some layers during training
     **_kwargs):                             # Ignore unrecognized keyword args.
 
     act = mapping_nonlinearity
+
+    # Transfer learning flag
+    if transfer_learning:
+        trainable_flag = False
+    else:
+        trainable_flag = True
 
     # Inputs.
     latents_in.set_shape([None, latent_size])
@@ -275,7 +283,7 @@ def G_mapping(
     # Embed labels and concatenate them with latents.
     if label_size:
         with tf.variable_scope('LabelConcat'):
-            w = tf.get_variable('weight', shape=[label_size, latent_size], initializer=tf.initializers.random_normal())
+            w = tf.get_variable('weight', shape=[label_size, latent_size], initializer=tf.initializers.random_normal(),trainable=trainable_flag)
             y = tf.matmul(labels_in, tf.cast(w, dtype))
             x = tf.concat([x, y], axis=1)
 
@@ -285,10 +293,11 @@ def G_mapping(
             x *= tf.rsqrt(tf.reduce_mean(tf.square(x), axis=1, keepdims=True) + 1e-8)
 
     # Mapping layers.
+    # While transfer learning, fix mapping layer weights
     for layer_idx in range(mapping_layers):
         with tf.variable_scope('Dense%d' % layer_idx):
             fmaps = dlatent_size if layer_idx == mapping_layers - 1 else mapping_fmaps
-            x = apply_bias_act(dense_layer(x, fmaps=fmaps, lrmul=mapping_lrmul), act=act, lrmul=mapping_lrmul)
+            x = apply_bias_act(dense_layer(x, fmaps=fmaps, lrmul=mapping_lrmul,trainable=trainable_flag), act=act, lrmul=mapping_lrmul, trainable=trainable_flag)
 
     # Broadcast.
     if dlatent_broadcast is not None:
@@ -321,7 +330,13 @@ def G_synthesis_stylegan_revised(
     structure           = 'auto',       # 'fixed' = no progressive growing, 'linear' = human-readable, 'recursive' = efficient, 'auto' = select automatically.
     is_template_graph   = False,        # True = template graph constructed by the Network class, False = actual evaluation.
     force_clean_graph   = False,        # True = construct a clean graph that looks nice in TensorBoard, False = default behavior.
+    transfer_learning   = False,        # Set transfer learning flag to freeze some layers during training
     **_kwargs):                         # Ignore unrecognized keyword args.
+
+    if transfer_learning:
+        trainable_flag = False
+    else:
+        trainable_flag = True
 
     resolution_log2 = int(np.log2(resolution))
     assert resolution == 2**resolution_log2 and resolution >= 4
@@ -346,40 +361,44 @@ def G_synthesis_stylegan_revised(
         noise_inputs.append(tf.get_variable('noise%d' % layer_idx, shape=shape, initializer=tf.initializers.random_normal(), trainable=False))
 
     # Single convolution layer with all the bells and whistles.
-    def layer(x, layer_idx, fmaps, kernel, up=False):
-        x = modulated_conv2d_layer(x, dlatents_in[:, layer_idx], fmaps=fmaps, kernel=kernel, up=up, resample_kernel=resample_kernel, fused_modconv=fused_modconv)
+    def layer(x, layer_idx, fmaps, kernel, up=False, trainable=True):
+        x = modulated_conv2d_layer(x, dlatents_in[:, layer_idx], fmaps=fmaps, kernel=kernel, up=up, resample_kernel=resample_kernel, fused_modconv=fused_modconv, trainable=trainable)
         if randomize_noise:
             noise = tf.random_normal([tf.shape(x)[0], 1, x.shape[2], x.shape[3]], dtype=x.dtype)
         else:
             noise = tf.cast(noise_inputs[layer_idx], x.dtype)
-        noise_strength = tf.get_variable('noise_strength', shape=[], initializer=tf.initializers.zeros())
+        noise_strength = tf.get_variable('noise_strength', shape=[], initializer=tf.initializers.zeros(), trainable=trainable)
         x += noise * tf.cast(noise_strength, x.dtype)
-        return apply_bias_act(x, act=act)
+        return apply_bias_act(x, act=act, trainable=trainable)
 
     # Early layers.
     with tf.variable_scope('4x4'):
         with tf.variable_scope('Const'):
-            x = tf.get_variable('const', shape=[1, nf(1), 4, 4], initializer=tf.initializers.random_normal())
+            x = tf.get_variable('const', shape=[1, nf(1), 4, 4], initializer=tf.initializers.random_normal(), trainable=trainable_flag)
             x = tf.tile(tf.cast(x, dtype), [tf.shape(dlatents_in)[0], 1, 1, 1])
         with tf.variable_scope('Conv'):
-            x = layer(x, layer_idx=0, fmaps=nf(1), kernel=3)
+            x = layer(x, layer_idx=0, fmaps=nf(1), kernel=3, trainable=trainable_flag)
 
     # Building blocks for remaining layers.
-    def block(res, x): # res = 3..resolution_log2
+    def block(res, x, trainable=True): # res = 3..resolution_log2
         with tf.variable_scope('%dx%d' % (2**res, 2**res)):
             with tf.variable_scope('Conv0_up'):
-                x = layer(x, layer_idx=res*2-5, fmaps=nf(res-1), kernel=3, up=True)
+                x = layer(x, layer_idx=res*2-5, fmaps=nf(res-1), kernel=3, up=True, trainable=trainable)
             with tf.variable_scope('Conv1'):
-                x = layer(x, layer_idx=res*2-4, fmaps=nf(res-1), kernel=3)
+                x = layer(x, layer_idx=res*2-4, fmaps=nf(res-1), kernel=3, trainable=trainable)
             return x
     def torgb(res, x): # res = 2..resolution_log2
         with tf.variable_scope('ToRGB_lod%d' % (resolution_log2 - res)):
+            # Not sure to fix this layer or not during transfer learning
+            # return apply_bias_act(modulated_conv2d_layer(x, dlatents_in[:, res*2-3], fmaps=num_channels, kernel=1, demodulate=False, fused_modconv=fused_modconv, trainable=trainable_flag), trainable=trainable_flag)
             return apply_bias_act(modulated_conv2d_layer(x, dlatents_in[:, res*2-3], fmaps=num_channels, kernel=1, demodulate=False, fused_modconv=fused_modconv))
 
     # Fixed structure: simple and efficient, but does not support progressive growing.
     if structure == 'fixed':
-        for res in range(3, resolution_log2 + 1):
-            x = block(res, x)
+        #for res in range(3, resolution_log2 + 1):
+        for res in range(3, resolution_log2):
+            x = block(res, x, trainable=trainable_flag)
+        x = block(resolution_log2, x, trainable=True) # for transfer learning, only train last block
         images_out = torgb(resolution_log2, x)
 
     # Linear structure: simple but inefficient.
@@ -387,7 +406,10 @@ def G_synthesis_stylegan_revised(
         images_out = torgb(2, x)
         for res in range(3, resolution_log2 + 1):
             lod = resolution_log2 - res
-            x = block(res, x)
+            if res < resolution_log2:
+                x = block(res, x, trainable=trainable_flag)
+            else:
+                x= block(res, x, trainable=True) # for transfer learning, only train last block
             img = torgb(res, x)
             with tf.variable_scope('Upsample_lod%d' % lod):
                 images_out = upsample_2d(images_out)
@@ -398,13 +420,16 @@ def G_synthesis_stylegan_revised(
     if structure == 'recursive':
         def cset(cur_lambda, new_cond, new_lambda):
             return lambda: tf.cond(new_cond, new_lambda, cur_lambda)
-        def grow(x, res, lod):
-            y = block(res, x)
+        def grow(x, res, lod, trainable):
+            if lod == 0:
+                y = block(res, x, trainable=True) # for transfer learning, only train last block
+            else:
+                y = block(res, x, trainable=trainable)
             img = lambda: naive_upsample_2d(torgb(res, y), factor=2**lod)
             img = cset(img, (lod_in > lod), lambda: naive_upsample_2d(tflib.lerp(torgb(res, y), upsample_2d(torgb(res - 1, x)), lod_in - lod), factor=2**lod))
-            if lod > 0: img = cset(img, (lod_in < lod), lambda: grow(y, res + 1, lod - 1))
+            if lod > 0: img = cset(img, (lod_in < lod), lambda: grow(y, res + 1, lod - 1, trainable))
             return img()
-        images_out = grow(x, 3, resolution_log2 - 3)
+        images_out = grow(x, 3, resolution_log2 - 3, trainable=trainable_flag)
 
     assert images_out.dtype == tf.as_dtype(dtype)
     return tf.identity(images_out, name='images_out')
@@ -429,7 +454,13 @@ def G_synthesis_stylegan2(
     dtype               = 'float32',    # Data type to use for activations and outputs.
     resample_kernel     = [1,3,3,1],    # Low-pass filter to apply when resampling activations. None = no filtering.
     fused_modconv       = True,         # Implement modulated_conv2d_layer() as a single fused op?
+    transfer_learning   = False,        # Set transfer learning flag to freeze some layers during training
     **_kwargs):                         # Ignore unrecognized keyword args.
+
+    if transfer_learning:
+        trainable_flag = False
+    else:
+        trainable_flag = True
 
     resolution_log2 = int(np.log2(resolution))
     assert resolution == 2**resolution_log2 and resolution >= 4
@@ -451,26 +482,26 @@ def G_synthesis_stylegan2(
         noise_inputs.append(tf.get_variable('noise%d' % layer_idx, shape=shape, initializer=tf.initializers.random_normal(), trainable=False))
 
     # Single convolution layer with all the bells and whistles.
-    def layer(x, layer_idx, fmaps, kernel, up=False):
-        x = modulated_conv2d_layer(x, dlatents_in[:, layer_idx], fmaps=fmaps, kernel=kernel, up=up, resample_kernel=resample_kernel, fused_modconv=fused_modconv)
+    def layer(x, layer_idx, fmaps, kernel, up=False, trainable=True):
+        x = modulated_conv2d_layer(x, dlatents_in[:, layer_idx], fmaps=fmaps, kernel=kernel, up=up, resample_kernel=resample_kernel, fused_modconv=fused_modconv, trainable=trainable)
         if randomize_noise:
             noise = tf.random_normal([tf.shape(x)[0], 1, x.shape[2], x.shape[3]], dtype=x.dtype)
         else:
             noise = tf.cast(noise_inputs[layer_idx], x.dtype)
-        noise_strength = tf.get_variable('noise_strength', shape=[], initializer=tf.initializers.zeros())
+        noise_strength = tf.get_variable('noise_strength', shape=[], initializer=tf.initializers.zeros(), trainable=trainable)
         x += noise * tf.cast(noise_strength, x.dtype)
-        return apply_bias_act(x, act=act)
+        return apply_bias_act(x, act=act, trainable=trainable)
 
     # Building blocks for main layers.
-    def block(x, res): # res = 3..resolution_log2
+    def block(x, res, trainable=True): # res = 3..resolution_log2
         t = x
         with tf.variable_scope('Conv0_up'):
-            x = layer(x, layer_idx=res*2-5, fmaps=nf(res-1), kernel=3, up=True)
+            x = layer(x, layer_idx=res*2-5, fmaps=nf(res-1), kernel=3, up=True, trainable=trainable)
         with tf.variable_scope('Conv1'):
-            x = layer(x, layer_idx=res*2-4, fmaps=nf(res-1), kernel=3)
+            x = layer(x, layer_idx=res*2-4, fmaps=nf(res-1), kernel=3, trainable=trainable)
         if architecture == 'resnet':
             with tf.variable_scope('Skip'):
-                t = conv2d_layer(t, fmaps=nf(res-1), kernel=1, up=True, resample_kernel=resample_kernel)
+                t = conv2d_layer(t, fmaps=nf(res-1), kernel=1, up=True, resample_kernel=resample_kernel, trainable=trainable)
                 x = (x + t) * (1 / np.sqrt(2))
         return x
     def upsample(y):
@@ -478,6 +509,7 @@ def G_synthesis_stylegan2(
             return upsample_2d(y, k=resample_kernel)
     def torgb(x, y, res): # res = 2..resolution_log2
         with tf.variable_scope('ToRGB'):
+            # not sure for transfer learning, fix weight?
             t = apply_bias_act(modulated_conv2d_layer(x, dlatents_in[:, res*2-3], fmaps=num_channels, kernel=1, demodulate=False, fused_modconv=fused_modconv))
             return t if y is None else y + t
 
@@ -485,17 +517,20 @@ def G_synthesis_stylegan2(
     y = None
     with tf.variable_scope('4x4'):
         with tf.variable_scope('Const'):
-            x = tf.get_variable('const', shape=[1, nf(1), 4, 4], initializer=tf.initializers.random_normal())
+            x = tf.get_variable('const', shape=[1, nf(1), 4, 4], initializer=tf.initializers.random_normal(), trainable=trainable_flag)
             x = tf.tile(tf.cast(x, dtype), [tf.shape(dlatents_in)[0], 1, 1, 1])
         with tf.variable_scope('Conv'):
-            x = layer(x, layer_idx=0, fmaps=nf(1), kernel=3)
+            x = layer(x, layer_idx=0, fmaps=nf(1), kernel=3, trainable=trainable_flag)
         if architecture == 'skip':
             y = torgb(x, y, 2)
 
     # Main layers.
     for res in range(3, resolution_log2 + 1):
         with tf.variable_scope('%dx%d' % (2**res, 2**res)):
-            x = block(x, res)
+            if res < resolution_log2:
+                x = block(x, res, trainable=trainable_flag)
+            else:
+                x = block(x, res, trainable=True) # for transfer learning, only train last block
             if architecture == 'skip':
                 y = upsample(y)
             if architecture == 'skip' or res == resolution_log2:
@@ -526,7 +561,13 @@ def D_stylegan(
     resample_kernel     = [1,3,3,1],    # Low-pass filter to apply when resampling activations. None = no filtering.
     structure           = 'auto',       # 'fixed' = no progressive growing, 'linear' = human-readable, 'recursive' = efficient, 'auto' = select automatically.
     is_template_graph   = False,        # True = template graph constructed by the Network class, False = actual evaluation.
+    transfer_learning   = False,        # Set transfer learning flag to freeze some layers during training
     **_kwargs):                         # Ignore unrecognized keyword args.
+
+    if transfer_learning:
+        trainable_flag = False
+    else:
+        trainable_flag = True
 
     resolution_log2 = int(np.log2(resolution))
     assert resolution == 2**resolution_log2 and resolution >= 4
@@ -541,33 +582,38 @@ def D_stylegan(
     lod_in = tf.cast(tf.get_variable('lod', initializer=np.float32(0.0), trainable=False), dtype)
 
     # Building blocks for spatial layers.
-    def fromrgb(x, res): # res = 2..resolution_log2
+    def fromrgb(x, res, trainable=True): # res = 2..resolution_log2
         with tf.variable_scope('FromRGB_lod%d' % (resolution_log2 - res)):
-            return apply_bias_act(conv2d_layer(x, fmaps=nf(res-1), kernel=1), act=act)
-    def block(x, res): # res = 2..resolution_log2
+            return apply_bias_act(conv2d_layer(x, fmaps=nf(res-1), kernel=1, trainable=trainable), act=act, trainable=trainable)
+    def block(x, res, trainable=True): # res = 2..resolution_log2
         with tf.variable_scope('%dx%d' % (2**res, 2**res)):
             with tf.variable_scope('Conv0'):
-                x = apply_bias_act(conv2d_layer(x, fmaps=nf(res-1), kernel=3), act=act)
+                x = apply_bias_act(conv2d_layer(x, fmaps=nf(res-1), kernel=3, trainable=trainable), act=act, trainable=trainable)
             with tf.variable_scope('Conv1_down'):
-                x = apply_bias_act(conv2d_layer(x, fmaps=nf(res-2), kernel=3, down=True, resample_kernel=resample_kernel), act=act)
+                x = apply_bias_act(conv2d_layer(x, fmaps=nf(res-2), kernel=3, down=True, resample_kernel=resample_kernel, trainable=trainable), act=act, trainable=trainable)
             return x
 
     # Fixed structure: simple and efficient, but does not support progressive growing.
     if structure == 'fixed':
-        x = fromrgb(images_in, resolution_log2)
+        x = fromrgb(images_in, resolution_log2, trainable=trainable_flag)
         for res in range(resolution_log2, 2, -1):
-            x = block(x, res)
-
+            if res > 3:
+                x = block(x, res, trainable=trainable_flag) # for transfer learning, only train last block
+            else:
+                x = block(x, res, trainable=True)
     # Linear structure: simple but inefficient.
     if structure == 'linear':
         img = images_in
-        x = fromrgb(img, resolution_log2)
+        x = fromrgb(img, resolution_log2, trainable=trainable_flag)
         for res in range(resolution_log2, 2, -1):
             lod = resolution_log2 - res
-            x = block(x, res)
+            if res > 3:
+                x = block(x, res, trainable=trainable_flag) # for transfer learning, only train last block
+            else:
+                x = block(x, res, trainable=True)
             with tf.variable_scope('Downsample_lod%d' % lod):
                 img = downsample_2d(img)
-            y = fromrgb(img, res - 1)
+            y = fromrgb(img, res - 1, trainable=trainable_flag)
             with tf.variable_scope('Grow_lod%d' % lod):
                 x = tflib.lerp_clip(x, y, lod_in - lod)
 
@@ -575,13 +621,16 @@ def D_stylegan(
     if structure == 'recursive':
         def cset(cur_lambda, new_cond, new_lambda):
             return lambda: tf.cond(new_cond, new_lambda, cur_lambda)
-        def grow(res, lod):
-            x = lambda: fromrgb(naive_downsample_2d(images_in, factor=2**lod), res)
-            if lod > 0: x = cset(x, (lod_in < lod), lambda: grow(res + 1, lod - 1))
-            x = block(x(), res); y = lambda: x
-            y = cset(y, (lod_in > lod), lambda: tflib.lerp(x, fromrgb(naive_downsample_2d(images_in, factor=2**(lod+1)), res - 1), lod_in - lod))
+        def grow(res, lod, trainable):
+            x = lambda: fromrgb(naive_downsample_2d(images_in, factor=2**lod), res, trainable=trainable)
+            if lod > 0: x = cset(x, (lod_in < lod), lambda: grow(res + 1, lod - 1, trainable=trainable))
+            if lod == 0:
+                x = block(x(), res, trainable=True); y = lambda: x
+            else:
+                x = block(x(), res, trainable=trainable); y = lambda: x # for transfer learning, only train last block
+            y = cset(y, (lod_in > lod), lambda: tflib.lerp(x, fromrgb(naive_downsample_2d(images_in, factor=2**(lod+1)), res - 1, trainable=trainable), lod_in - lod))
             return y()
-        x = grow(3, resolution_log2 - 3)
+        x = grow(3, resolution_log2 - 3, trainable=trainable_flag)
 
     # Final layers at 4x4 resolution.
     with tf.variable_scope('4x4'):
@@ -626,7 +675,13 @@ def D_stylegan2(
     mbstd_num_features  = 1,            # Number of features for the minibatch standard deviation layer.
     dtype               = 'float32',    # Data type to use for activations and outputs.
     resample_kernel     = [1,3,3,1],    # Low-pass filter to apply when resampling activations. None = no filtering.
+    transfer_learning   = False,        # Set transfer learning flag to freeze some layers during training
     **_kwargs):                         # Ignore unrecognized keyword args.
+
+    if transfer_learning:
+        trainable_flag = False
+    else:
+        trainable_flag = True
 
     resolution_log2 = int(np.log2(resolution))
     assert resolution == 2**resolution_log2 and resolution >= 4
@@ -640,19 +695,19 @@ def D_stylegan2(
     labels_in = tf.cast(labels_in, dtype)
 
     # Building blocks for main layers.
-    def fromrgb(x, y, res): # res = 2..resolution_log2
+    def fromrgb(x, y, res, trainable=True): # res = 2..resolution_log2
         with tf.variable_scope('FromRGB'):
-            t = apply_bias_act(conv2d_layer(y, fmaps=nf(res-1), kernel=1), act=act)
+            t = apply_bias_act(conv2d_layer(y, fmaps=nf(res-1), kernel=1, trainable=trainable), act=act, trainable=trainable)
             return t if x is None else x + t
-    def block(x, res): # res = 2..resolution_log2
+    def block(x, res, trainable=True): # res = 2..resolution_log2
         t = x
         with tf.variable_scope('Conv0'):
-            x = apply_bias_act(conv2d_layer(x, fmaps=nf(res-1), kernel=3), act=act)
+            x = apply_bias_act(conv2d_layer(x, fmaps=nf(res-1), kernel=3, trainable=trainable), act=act, trainable=trainable)
         with tf.variable_scope('Conv1_down'):
-            x = apply_bias_act(conv2d_layer(x, fmaps=nf(res-2), kernel=3, down=True, resample_kernel=resample_kernel), act=act)
+            x = apply_bias_act(conv2d_layer(x, fmaps=nf(res-2), kernel=3, down=True, resample_kernel=resample_kernel, trainable=trainable), act=act, trainable=trainable)
         if architecture == 'resnet':
             with tf.variable_scope('Skip'):
-                t = conv2d_layer(t, fmaps=nf(res-2), kernel=1, down=True, resample_kernel=resample_kernel)
+                t = conv2d_layer(t, fmaps=nf(res-2), kernel=1, down=True, resample_kernel=resample_kernel, trainable=trainable)
                 x = (x + t) * (1 / np.sqrt(2))
         return x
     def downsample(y):
@@ -665,8 +720,11 @@ def D_stylegan2(
     for res in range(resolution_log2, 2, -1):
         with tf.variable_scope('%dx%d' % (2**res, 2**res)):
             if architecture == 'skip' or res == resolution_log2:
-                x = fromrgb(x, y, res)
-            x = block(x, res)
+                x = fromrgb(x, y, res, trainable=trainable_flag)
+            if res > 3:
+                x = block(x, res, trainable=trainable_flag)
+            else:
+                x = block(x, res, trainable=True) # for transfer learning, only train last block
             if architecture == 'skip':
                 y = downsample(y)
 
