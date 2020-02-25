@@ -24,6 +24,7 @@ _valid_configs = [
     'config-d', # + Path length regularization
     'config-e', # + No growing, new G & D arch.
     'config-f', # + Large networks (default)
+    'config-f-transfer', # config-f with transfer learning setting
 
     # Table 2
     'config-e-Gorig-Dorig',   'config-e-Gorig-Dresnet',   'config-e-Gorig-Dskip',
@@ -68,8 +69,13 @@ def run(dataset, data_dir, result_dir, config_id, num_gpus, total_kimg, gamma, m
     desc += '-' + config_id
 
     # Configs A-E: Shrink networks to match original StyleGAN.
-    if config_id != 'config-f':
+    #if config_id != 'config-f':
+    if not config_id.startswith('config-f'):
         G.fmap_base = D.fmap_base = 8 << 10
+
+    # Transfer learning for config-f
+    if config_id is 'config-f-transfer':
+        G.transfer_learning = D.transfer_learning = True
 
     # Config E: Set gamma to 100 and override G & D architecture.
     if config_id.startswith('config-e'):
