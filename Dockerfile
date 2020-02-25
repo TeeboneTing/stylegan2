@@ -9,3 +9,6 @@ FROM tensorflow/tensorflow:1.15.0-gpu-py3
 RUN pip install scipy==1.3.3
 RUN pip install requests==2.22.0
 RUN pip install Pillow==6.2.1
+
+ADD . /opt/stylegan
+WORKDIR /opt/stylegan
