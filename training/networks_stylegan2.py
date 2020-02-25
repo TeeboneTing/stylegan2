@@ -164,7 +164,7 @@ def G_main(
     components              = dnnlib.EasyDict(),        # Container for sub-networks. Retained between calls.
     mapping_func            = 'G_mapping',              # Build func name for the mapping network.
     synthesis_func          = 'G_synthesis_stylegan2',  # Build func name for the synthesis network.
-    transfer_learning       = False,                    # Set transfer learning flag to freeze some layers during training
+    #transfer_learning       = False,                    # Set transfer learning flag to freeze some layers during training
     **kwargs):                                          # Arguments for sub-networks (mapping and synthesis).
 
     # Validate arguments.
@@ -682,6 +682,8 @@ def D_stylegan2(
         trainable_flag = False
     else:
         trainable_flag = True
+
+    import pdb; pdb.set_trace() # debug breakpoint to check transfer learning works or not
 
     resolution_log2 = int(np.log2(resolution))
     assert resolution == 2**resolution_log2 and resolution >= 4
