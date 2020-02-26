@@ -10,5 +10,7 @@ RUN pip install scipy==1.3.3
 RUN pip install requests==2.22.0
 RUN pip install Pillow==6.2.1
 
+RUN apt-get update; apt-get install -y git vim
+
 ADD . /opt/stylegan
 WORKDIR /opt/stylegan
