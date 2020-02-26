@@ -42,6 +42,9 @@ def dense_layer(x, fmaps, gain=1, use_wscale=True, lrmul=1, weight_var='weight',
     if len(x.shape) > 2:
         x = tf.reshape(x, [-1, np.prod([d.value for d in x.shape[1:]])])
     w = get_weight([x.shape[1].value, fmaps], gain=gain, use_wscale=use_wscale, lrmul=lrmul, weight_var=weight_var, trainable=trainable)
+    
+    import pdb; pdb.set_trace()
+    
     w = tf.cast(w, x.dtype)
     return tf.matmul(x, w)
 
