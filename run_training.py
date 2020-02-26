@@ -120,7 +120,6 @@ def run(dataset, data_dir, result_dir, config_id, num_gpus, total_kimg, gamma, m
     if gamma is not None:
         D_loss.gamma = gamma
 
-    import pdb; pdb.set_trace()
 
     sc.submit_target = dnnlib.SubmitTarget.LOCAL
     sc.local.do_not_copy_source_files = True
