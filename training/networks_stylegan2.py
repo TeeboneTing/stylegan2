@@ -683,7 +683,7 @@ def D_stylegan2(
     else:
         trainable_flag = True
 
-    import pdb; pdb.set_trace() # debug breakpoint to check transfer learning works or not
+    #import pdb; pdb.set_trace() # debug breakpoint to check transfer learning works or not
 
     resolution_log2 = int(np.log2(resolution))
     assert resolution == 2**resolution_log2 and resolution >= 4
