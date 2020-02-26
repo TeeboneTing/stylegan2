@@ -726,7 +726,8 @@ def D_stylegan2(
             if res > 3:
                 x = block(x, res, trainable=trainable_flag)
             else:
-                x = block(x, res, trainable=True) # for transfer learning, only train last block
+                #x = block(x, res, trainable=True) # for transfer learning, only train last block
+                x = block(x, res, trainable=False)
             if architecture == 'skip':
                 y = downsample(y)
 
