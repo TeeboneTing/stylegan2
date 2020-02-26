@@ -157,6 +157,10 @@ def training_loop(
 
     # Print layers and generate initial image snapshot.
     G.print_layers(); D.print_layers()
+
+    # breakpoint to check G/D trainable variables
+    import pdb; pdb.set_trace()
+
     sched = training_schedule(cur_nimg=total_kimg*1000, training_set=training_set, **sched_args)
     grid_latents = np.random.randn(np.prod(grid_size), *G.input_shape[1:])
     grid_fakes = Gs.run(grid_latents, grid_labels, is_validation=True, minibatch_size=sched.minibatch_gpu)
