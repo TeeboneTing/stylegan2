@@ -42,9 +42,6 @@ def dense_layer(x, fmaps, gain=1, use_wscale=True, lrmul=1, weight_var='weight',
     if len(x.shape) > 2:
         x = tf.reshape(x, [-1, np.prod([d.value for d in x.shape[1:]])])
     w = get_weight([x.shape[1].value, fmaps], gain=gain, use_wscale=use_wscale, lrmul=lrmul, weight_var=weight_var, trainable=trainable)
-    
-    import pdb; pdb.set_trace()
-    
     w = tf.cast(w, x.dtype)
     return tf.matmul(x, w)
 
@@ -510,10 +507,9 @@ def G_synthesis_stylegan2(
     def upsample(y):
         with tf.variable_scope('Upsample'):
             return upsample_2d(y, k=resample_kernel)
-    def torgb(x, y, res): # res = 2..resolution_log2
+    def torgb(x, y, res, trainable = True): # res = 2..resolution_log2
         with tf.variable_scope('ToRGB'):
-            # not sure for transfer learning, fix weight?
-            t = apply_bias_act(modulated_conv2d_layer(x, dlatents_in[:, res*2-3], fmaps=num_channels, kernel=1, demodulate=False, fused_modconv=fused_modconv))
+            t = apply_bias_act(modulated_conv2d_layer(x, dlatents_in[:, res*2-3], fmaps=num_channels, kernel=1, demodulate=False, fused_modconv=fused_modconv, trainable=trainable), trainable=trainable)
             return t if y is None else y + t
 
     # Early layers.
@@ -525,7 +521,7 @@ def G_synthesis_stylegan2(
         with tf.variable_scope('Conv'):
             x = layer(x, layer_idx=0, fmaps=nf(1), kernel=3, trainable=trainable_flag)
         if architecture == 'skip':
-            y = torgb(x, y, 2)
+            y = torgb(x, y, 2, trainable=trainable_flag)
 
     # Main layers.
     for res in range(3, resolution_log2 + 1):
@@ -537,7 +533,10 @@ def G_synthesis_stylegan2(
             if architecture == 'skip':
                 y = upsample(y)
             if architecture == 'skip' or res == resolution_log2:
-                y = torgb(x, y, res)
+                if res < resolution_log2:
+                    y = torgb(x, y, res, trainable=trainable_flag)
+                else:
+                    y = torgb(x, y, res, trainable=True) # for transfer learning, only train last block
     images_out = y
 
     assert images_out.dtype == tf.as_dtype(dtype)
