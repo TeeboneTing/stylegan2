@@ -69,6 +69,7 @@ def run(dataset, data_dir, result_dir, config_id, num_gpus, total_kimg, gamma, m
     if resume_pkl is not None and resume_kimg is not None:
         train.resume_pkl = resume_pkl
         train.resume_kimg = resume_kimg
+        train.resume_with_new_nets = True
 
     assert config_id in _valid_configs
     desc += '-' + config_id
