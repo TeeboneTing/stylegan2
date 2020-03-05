@@ -164,7 +164,6 @@ def G_main(
     components              = dnnlib.EasyDict(),        # Container for sub-networks. Retained between calls.
     mapping_func            = 'G_mapping',              # Build func name for the mapping network.
     synthesis_func          = 'G_synthesis_stylegan2',  # Build func name for the synthesis network.
-    #transfer_learning       = False,                    # Set transfer learning flag to freeze some layers during training
     **kwargs):                                          # Arguments for sub-networks (mapping and synthesis).
 
     # Validate arguments.
