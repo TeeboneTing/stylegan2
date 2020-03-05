@@ -25,6 +25,8 @@ _valid_configs = [
     'config-e', # + No growing, new G & D arch.
     'config-f', # + Large networks (default)
     'config-f-transfer', # config-f with transfer learning setting
+    'config-f-transfer-planB',
+    'config-f-transfer-planC',
 
     # Table 2
     'config-e-Gorig-Dorig',   'config-e-Gorig-Dresnet',   'config-e-Gorig-Dskip',
@@ -52,8 +54,8 @@ def run(dataset, data_dir, result_dir, config_id, num_gpus, total_kimg, gamma, m
     train.mirror_augment = mirror_augment
     train.image_snapshot_ticks = train.network_snapshot_ticks = 10
     sched.G_lrate_base = sched.D_lrate_base = 0.002
-    #sched.minibatch_size_base = 32
-    sched.minibatch_size_base = 48
+    sched.minibatch_size_base = 32
+    #sched.minibatch_size_base = 48
     sched.minibatch_gpu_base = 4
     D_loss.gamma = 10
     metrics = [metric_defaults[x] for x in metrics]
@@ -80,8 +82,18 @@ def run(dataset, data_dir, result_dir, config_id, num_gpus, total_kimg, gamma, m
         G.fmap_base = D.fmap_base = 8 << 10
 
     # Transfer learning for config-f
-    if config_id == 'config-f-transfer':
+    if config_id.startswith('config-f-transfer'):
         G.transfer_learning = D.transfer_learning = True
+        train.network_snapshot_ticks = 4 # save model per xx tick
+        train.image_snapshot_ticks = 4   # print image per xx tick
+
+    # plan B and plan C on transfer learning
+    if config_id == 'config-f-transfer-planB':
+        G.func_name = 'training.networks_stylegan2_planB.G_main'
+        D.func_name = 'training.networks_stylegan2_planB.D_stylegan2'
+    if config_id == 'config-f-transfer-planC':
+        G.func_name = 'training.networks_stylegan2_planC.G_main'
+        D.func_name = 'training.networks_stylegan2_planC.D_stylegan2'
 
     # Config E: Set gamma to 100 and override G & D architecture.
     if config_id.startswith('config-e'):
