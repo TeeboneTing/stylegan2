@@ -27,6 +27,7 @@ _valid_configs = [
     'config-f-transfer', # config-f with transfer learning setting
     'config-f-transfer-planB',
     'config-f-transfer-planC',
+    'config-f-transfer-planD',
 
     # Table 2
     'config-e-Gorig-Dorig',   'config-e-Gorig-Dresnet',   'config-e-Gorig-Dskip',
@@ -94,6 +95,9 @@ def run(dataset, data_dir, result_dir, config_id, num_gpus, total_kimg, gamma, m
     if config_id == 'config-f-transfer-planC':
         G.func_name = 'training.networks_stylegan2_planC.G_main'
         D.func_name = 'training.networks_stylegan2_planC.D_stylegan2'
+    if config_id == 'config-f-transfer-planD':
+        G.func_name = 'training.networks_stylegan2_planD.G_main'
+        D.func_name = 'training.networks_stylegan2_planD.D_stylegan2'
 
     # Config E: Set gamma to 100 and override G & D architecture.
     if config_id.startswith('config-e'):
