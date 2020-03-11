@@ -28,7 +28,7 @@ _valid_configs = [
     'config-f-transfer-planB',
     'config-f-transfer-planC',
     'config-f-transfer-planD',
-
+    'config-f-transfer-planD-2',
     # Table 2
     'config-e-Gorig-Dorig',   'config-e-Gorig-Dresnet',   'config-e-Gorig-Dskip',
     'config-e-Gresnet-Dorig', 'config-e-Gresnet-Dresnet', 'config-e-Gresnet-Dskip',
@@ -98,6 +98,10 @@ def run(dataset, data_dir, result_dir, config_id, num_gpus, total_kimg, gamma, m
     if config_id == 'config-f-transfer-planD':
         G.func_name = 'training.networks_stylegan2_planD.G_main'
         D.func_name = 'training.networks_stylegan2_planD.D_stylegan2'
+    if config_id == 'config-f-transfer-planD-2':
+        G.func_name = 'training.networks_stylegan2_planC.G_main'
+        D.func_name = 'training.networks_stylegan2_planC.D_stylegan2'
+        sched.G_lrate_dict = sched.D_lrate_dict = {128: 0.0015, 256: 0.002, 512: 0.001}
 
     # Config E: Set gamma to 100 and override G & D architecture.
     if config_id.startswith('config-e'):
