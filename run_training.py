@@ -29,6 +29,7 @@ _valid_configs = [
     'config-f-transfer-planC',
     'config-f-transfer-planD',
     'config-f-transfer-planD-2',
+    'config-f-transfer-planE',
     # Table 2
     'config-e-Gorig-Dorig',   'config-e-Gorig-Dresnet',   'config-e-Gorig-Dskip',
     'config-e-Gresnet-Dorig', 'config-e-Gresnet-Dresnet', 'config-e-Gresnet-Dskip',
@@ -85,8 +86,8 @@ def run(dataset, data_dir, result_dir, config_id, num_gpus, total_kimg, gamma, m
     # Transfer learning for config-f
     if config_id.startswith('config-f-transfer'):
         G.transfer_learning = D.transfer_learning = True
-        train.network_snapshot_ticks = 4 # save model per xx tick
-        train.image_snapshot_ticks = 4   # print image per xx tick
+        train.network_snapshot_ticks = 2 # save model per xx tick
+        train.image_snapshot_ticks = 2   # print image per xx tick
 
     # plan B and plan C on transfer learning
     if config_id == 'config-f-transfer-planB':
@@ -101,7 +102,11 @@ def run(dataset, data_dir, result_dir, config_id, num_gpus, total_kimg, gamma, m
     if config_id == 'config-f-transfer-planD-2':
         G.func_name = 'training.networks_stylegan2_planC.G_main'
         D.func_name = 'training.networks_stylegan2_planC.D_stylegan2'
-        sched.G_lrate_dict = sched.D_lrate_dict = {128: 0.0015, 256: 0.002, 512: 0.001}
+        sched.G_lrate_dict = sched.D_lrate_dict = {512: 0.0005}
+    if config_id == 'config-f-transfer-planE':
+        G.func_name = 'training.networks_stylegan2_planE.G_main'
+        D.func_name = 'training.networks_stylegan2_planE.D_stylegan2'
+        #sched.G_lrate_dict = sched.D_lrate_dict = {512: 0.001}
 
     # Config E: Set gamma to 100 and override G & D architecture.
     if config_id.startswith('config-e'):
